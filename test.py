@@ -1,6 +1,6 @@
 import requests
 
-token = 'vk1.a.ogWInwixhafy3L8d8RfD8ujboxwYdQyqymYleunMP-8k0Nu1b4SeWhDK9d6osRlmCdR2F7lxdESmYgBDI3aPOaeW9ejVhibAtk3BayWJNG8JSLJ960CnXcoIffcAqb1hAjAsEzfYeScRveVfWngtw5frmMn0g7o5DiOHWJ0OgttN7N2K9ldkT2uhM7wEwwn4'
+token = 
 user_id = '502402141'
 album_id = 'wall_id'
 
