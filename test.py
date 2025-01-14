@@ -1,92 +1,115 @@
 import requests
 import os
 import json
-import tqdm
+from tqdm import tqdm
 import logging
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def create_folder(token, folder_name):
-    url = f"https://cloud-api.yandex.net/v1/disk/resources/"
-    params = {"path": folder_name}
-    headers = {'Authorization': f'OAuth {token}'}
 
-    response = requests.put(url, headers=headers, params=params)
+class VKApi:
+    def __init__(self, token):
+        self.token = token
+        self.version = '5.131'
 
-    if response.status_code == 201:
-        logging.info(f"Папка '{folder_name}' успешно создана.")
-    elif response.status_code == 409:
-        logging.warning(f"Папка '{folder_name}' уже существует.")
-    else:
-        logging.error(f"Ошибка при создании папки: {response.status_code}")
-        raise Exception("Ошибка создания папки")
+    def get_photos(self, user_id=None, screen_name=None):
+        base_url = 'https://api.vk.com/method/photos.getAll'
+        params = {
+            'access_token': self.token,
+            'v': self.version,
+            'owner_id': user_id,
+            'count': 5
+        }
+
+        if screen_name:
+            user_info = self.get_user_info(screen_name)
+            if user_info:
+                params['owner_id'] = user_info['id']
+
+        response = requests.get(base_url, params=params)
+        if response.status_code == 200:
+            return response.json().get('response', {}).get('items', [])
+        else:
+            logging.error(f"Ошибка при получении фотографий: {response.text}")
+            return []
+
+    def get_user_info(self, screen_name):
+        base_url = 'https://api.vk.com/method/users.get'
+        params = {
+            'user_ids': screen_name,
+            'access_token': self.token,
+            'v': self.version
+        }
+
+        response = requests.get(base_url, params=params)
+        if response.status_code == 200:
+            return response.json().get('response', [{}])[0]
+        else:
+            logging.error(f"Ошибка получения информации о пользователе: {response.text}")
+            return None
 
 
-def upload_to_yandex_disk(token, folder_name, file_name, file_path):
-    headers = {
-        'Authorization': f'OAuth {token}',
-    }
-    url = f'https://cloud-api.yandex.net/v1/disk/resources/upload?path={folder_name}/{file_name}&overwrite=true'
+class YandexDisk:
+    def __init__(self, token):
+        self.token = token
 
-    response = requests.get(url, headers=headers)
+    def create_folder(self, folder_name):
+        url = f"https://cloud-api.yandex.net/v1/disk/resources/"
+        params = {"path": folder_name}
+        headers = {'Authorization': f'OAuth {self.token}'}
 
-    if response.status_code == 200:
-        upload_url = response.json().get('href')
-        with open(file_path, 'rb') as file:
-            response = requests.put(upload_url, data=file)
-            if response.status_code == 201:
-                logging.info(f"Файл '{file_name}' успешно загружен.")
-            else:
-                logging.error(f"Ошибка загрузки файла '{file_name}': {response.status_code}")
-    else:
-        logging.error("Ошибка получения URL для загрузки:", response.status_code)
+        response = requests.put(url, headers=headers, params=params)
+
+        if response.status_code == 201:
+            logging.info(f"Папка '{folder_name}' успешно создана.")
+        elif response.status_code == 409:
+            logging.warning(f"Папка '{folder_name}' уже существует.")
+        else:
+            logging.error(f"Ошибка при создании папки: {response.text}")
+
+    def upload_photo(self, photo_data, folder_name):
+        url = f"https://cloud-api.yandex.net/v1/disk/resources/upload"
+        headers = {'Authorization': f'OAuth {self.token}'}
+        params = {
+            "path": f"{folder_name}/{photo_data['likes']['count']}_"
+                    f"{photo_data['date']}.jpg" if photo_data['likes'][
+                                                       'count'] == 0 else f"{photo_data['likes']['count']}.jpg",
+            "overwrite": "true"
+        }
+
+        upload_link_response = requests.get(url, headers=headers, params=params)
+        upload_link_response.raise_for_status()
+        upload_url = upload_link_response.json()['href']
+
+        photo_url = photo_data['sizes'][-1]['url']
+        response = requests.get(photo_url, stream=True)
+
+        if response.status_code == 200:
+            with requests.put(upload_url, files={'file': response.raw}) as upload_res:
+                if upload_res.status_code == 201:
+                    logging.info(f"Фото '{photo_data['likes']['count']}.jpg' загружено успешно.")
+                else:
+                    logging.error(f"Ошибка при загрузке фотографии: {upload_res.text}")
+        else:
+            logging.error(f"Ошибка при получении фото: {response.text}")
 
 
 def main():
-    user_id = input("Введите ID пользователя VK: ")
-    token = input("Введите токен Яндекс.Диска: ")
-    folder_name = "VK_Photos"
-    num_photos = 5
+    vk_token = input("Введите токен VK: ")
+    yandex_token = input("Введите токен Яндекс.Диска: ")
+    user_input = input("Введите ID или screen_name пользователя: ")
 
-    create_folder(token, folder_name)
+    vk_api = VKApi(vk_token)
+    yandex_disk = YandexDisk(yandex_token)
 
-    url = 'https://api.vk.com/method/photos.get'
-    params = {
-        'access_token': token,
-        'owner_id': user_id,
-        'album_id': 'wall',
-        'count': 200,
-        'v': '5.131'
-    }
+    photos = vk_api.get_photos(screen_name=user_input)
 
-    response = requests.get(url, params=params)
+    folder_name = 'VK_Photos'
+    yandex_disk.create_folder(folder_name)
 
-    if response.status_code == 200:
-        data = response.json()
-        if 'response' in data:
-            photos = data['response']['items']
-
-            photos = sorted(photos, key=lambda x: (x['width'] * x['height']), reverse=True)
-            top_photos = photos[:num_photos]
-
-            for photo in tqdm(top_photos, desc="Загрузка фотографий"):
-                file_name = f"{photo['id']}.jpg"
-                file_path = photo['sizes'][-1]['url']
-
-                photo_response = requests.get(file_path)
-                if photo_response.status_code == 200:
-                    with open(file_name, 'wb') as f:
-                        f.write(photo_response.content)
-
-                    upload_to_yandex_disk(token, folder_name, file_name, file_name)
-                    os.remove(file_name)
-                else:
-                    logging.error(f"Ошибка скачивания фотографии ID {photo['id']}: {photo_response.status_code}")
-        else:
-            logging.error("Ошибка в ответе VK API.")
-    else:
-        logging.error("Ошибка при получении фотографий из VK:", response.status_code)
+    for photo in tqdm(photos, desc="Загрузка фотографий"):
+        yandex_disk.upload_photo(photo, folder_name)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
